@@ -1,0 +1,22 @@
+# Environment variables
+.env
+
+# Data, Database, and Caches
+data/
+.cache
+*.db
+temp_chunk.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
