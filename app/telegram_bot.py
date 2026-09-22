@@ -15,9 +15,10 @@ class TelegramBot:
         else:
             self.enabled = True
 
-    def send_message(self, text: str) -> bool:
+    def send_message(self, text: str) -> int:
+        """Sends a message and returns the message_id on success, or None on failure."""
         if not self.enabled:
-            return False
+            return None
             
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         payload = {
@@ -31,12 +32,37 @@ class TelegramBot:
             response = requests.post(url, json=payload, timeout=10)
             if response.status_code == 200:
                 logger.debug("Successfully sent message to Telegram.")
-                return True
+                data = response.json()
+                return data.get("result", {}).get("message_id")
             else:
                 logger.error(f"Failed to send message to Telegram: {response.text}")
-                return False
+                return None
         except Exception as e:
             logger.error(f"Error sending message to Telegram: {e}")
+            return None
+
+    def pin_message(self, message_id: int) -> bool:
+        """Pins a specific message in the chat."""
+        if not self.enabled or not message_id:
+            return False
+            
+        url = f"https://api.telegram.org/bot{self.token}/pinChatMessage"
+        payload = {
+            "chat_id": self.chat_id,
+            "message_id": message_id,
+            "disable_notification": True  # True to avoid a second notification sound for the pin
+        }
+        
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                logger.debug(f"Successfully pinned message {message_id}.")
+                return True
+            else:
+                logger.error(f"Failed to pin message: {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error pinning message: {e}")
             return False
 
     def send_live_alert(self, channel: str, title: str) -> bool:
@@ -46,7 +72,11 @@ class TelegramBot:
             f"Трансляция: {title}\n\n"
             f"<a href='https://twitch.tv/{channel}'>Смотреть на Twitch</a>"
         )
-        return self.send_message(text)
+        msg_id = self.send_message(text)
+        if msg_id:
+            self.pin_message(msg_id)
+            return True
+        return False
         
     def send_track(self, track_full_name: str, spotify_url: str, timecode_sec: float) -> bool:
         # Format timecode
@@ -65,4 +95,4 @@ class TelegramBot:
         else:
             text += f"<i>(В Spotify не найдено)</i>"
             
-        return self.send_message(text)
+        return bool(self.send_message(text))
