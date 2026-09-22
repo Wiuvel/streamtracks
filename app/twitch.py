@@ -12,6 +12,7 @@ class TwitchMonitor:
         self.channel = os.getenv("TWITCH_CHANNEL")
         self.oauth_token = os.getenv("TWITCH_OAUTH_TOKEN")
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        self.cached_m3u8_url = None
             
     def get_audio_stream_url(self):
         """Quick check to see if stream is live and returns M3U8 URL"""
@@ -36,24 +37,34 @@ class TwitchMonitor:
             except OSError:
                 pass
 
-        m3u8_url = self.get_audio_stream_url()
+        # Use cached session URL to avoid triggering a new 30-second ad on every check!
+        is_new_session = False
+        if not self.cached_m3u8_url:
+            self.cached_m3u8_url = self.get_audio_stream_url()
+            is_new_session = True
+            
+        m3u8_url = self.cached_m3u8_url
         if not m3u8_url:
             logger.error("Failed to get M3U8 URL from yt-dlp.")
             return False
 
         ts_file = final_output_file.replace(".mp3", ".ts")
-        logger.info(f"Got M3U8 URL: {m3u8_url[:50]}...[truncated]")
+        logger.info(f"Using M3U8 URL: {m3u8_url[:50]}...[truncated]")
         
         try:
-            # 1. Start the HLS session to trigger the pre-roll ad timer
-            req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                pass # Throw away the ad playlist
-                
-            logger.info("Session started. Waiting 32 seconds for Twitch pre-roll ad/silent placeholder to finish...")
-            await asyncio.sleep(32)
+            if is_new_session:
+                # 1. Start the HLS session to trigger the pre-roll ad timer
+                req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    pass # Throw away the ad playlist
+                    
+                # We must wait long enough for the 30s ad to finish AND for it to completely fall off 
+                # the back of the sliding HLS playlist window (~20s history). 30s + 25s = 55 seconds.
+                logger.info("New session started. Waiting 55 seconds to completely flush the silent pre-roll ad from the playlist...")
+                await asyncio.sleep(55)
             
-            # 2. Fetch the M3U8 playlist AGAIN. The ad is now over, and it contains real live segments!
+            # 2. Fetch the M3U8 playlist. The ad is now gone forever for this session!
+            req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
             with urllib.request.urlopen(req, timeout=10) as response:
                 m3u8_content = response.read().decode('utf-8')
             
@@ -176,8 +187,15 @@ class TwitchMonitor:
             logger.error("ffmpeg failed to convert TS to MP3.")
             return False
 
+        except urllib.error.HTTPError as e:
+            logger.warning(f"HTTP Error {e.code} while fetching M3U8. Session may have expired. Clearing cache.")
+            self.cached_m3u8_url = None
+            if os.path.exists(ts_file):
+                os.remove(ts_file)
+            return False
         except Exception as e:
             logger.error(f"Native audio recording failed: {e}")
+            self.cached_m3u8_url = None
             if os.path.exists(ts_file):
                 os.remove(ts_file)
             return False
