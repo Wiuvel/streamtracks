@@ -45,12 +45,19 @@ class TwitchMonitor:
         logger.info(f"Got M3U8 URL: {m3u8_url[:50]}...[truncated]")
         
         try:
-            # 1. Fetch the M3U8 playlist
+            # 1. Start the HLS session to trigger the pre-roll ad timer
             req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                pass # Throw away the ad playlist
+                
+            logger.info("Session started. Waiting 32 seconds for Twitch pre-roll ad/silent placeholder to finish...")
+            await asyncio.sleep(32)
+            
+            # 2. Fetch the M3U8 playlist AGAIN. The ad is now over, and it contains real live segments!
             with urllib.request.urlopen(req, timeout=10) as response:
                 m3u8_content = response.read().decode('utf-8')
             
-            # 2. Extract TS segment URLs
+            # 3. Extract TS segment URLs
             ts_urls = []
             for line in m3u8_content.splitlines():
                 if line and not line.startswith('#'):
