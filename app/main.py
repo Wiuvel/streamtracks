@@ -91,8 +91,15 @@ async def main():
                             logger.info("Max retries reached. Restoring standard check interval.")
                             consecutive_failures = 0
                         
-                    # Cleanup chunk
+                    # Cleanup or save chunk for debugging
                     if os.path.exists(chunk_file):
+                        if not result:
+                            # Save the failed chunk so the user can listen to it
+                            import shutil
+                            debug_file = "/data/debug_last_failed_chunk.mp3"
+                            shutil.copy(chunk_file, debug_file)
+                            logger.info(f"Saved debug audio chunk to {debug_file}")
+                            
                         try:
                             os.remove(chunk_file)
                         except OSError:
