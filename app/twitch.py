@@ -113,8 +113,11 @@ class TwitchMonitor:
             
             try:
                 probe_out = subprocess.check_output(probe_cmd).decode('utf-8').strip()
-                num_audio = len([x for x in probe_out.splitlines() if x])
-                logger.info(f"ffprobe output: '{probe_out.replace(chr(10), ',')}', Tracks detected: {num_audio}")
+                # Use set() to count unique stream indices because ffprobe might print the same index multiple times 
+                # when reading a concatenated TS file.
+                unique_streams = set([x for x in probe_out.splitlines() if x.strip()])
+                num_audio = len(unique_streams)
+                logger.info(f"ffprobe output: '{probe_out.replace(chr(10), ',')}', Unique tracks detected: {num_audio}")
             except Exception as e:
                 logger.warning(f"ffprobe failed: {e}")
                 num_audio = 1
