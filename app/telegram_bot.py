@@ -43,7 +43,7 @@ class TelegramBot:
         text = (
             f"<b>Стрим начался!</b>\n\n"
             f"Канал: <b>{channel}</b>\n"
-            f"Трансляция: <i>{title}</i>\n\n"
+            f"Трансляция: {title}\n\n"
             f"<a href='https://twitch.tv/{channel}'>Смотреть на Twitch</a>"
         )
         return self.send_message(text)
