@@ -49,26 +49,30 @@ async def main():
         logger.critical("TWITCH_CHANNEL is not set in .env. Exiting.")
         return
         
-    # Track history to avoid duplicates in the same stream session
-    tracks_played_this_stream = set()
-    was_live = False
-    is_first_check = True
-
+    import uuid
+    
     while True:
         sleep_time = check_interval
         
         try:
-            if twitch.get_audio_stream_url():
-                if not was_live:
-                    was_live = True
-                    tracks_played_this_stream.clear()
+            is_live_now = bool(twitch.get_audio_stream_url())
+            was_live_db = await db.get_state("is_live") == "1"
+            current_stream_id = await db.get_state("current_stream_id")
+            
+            if is_live_now:
+                if not was_live_db:
+                    # Stream JUST went live, or started while bot was offline
+                    current_stream_id = str(uuid.uuid4())
+                    await db.set_state("current_stream_id", current_stream_id)
+                    await db.set_state("is_live", "1")
                     
-                    if not is_first_check:
-                        logger.info("Stream just went live! Sending alert to Telegram.")
-                        title = twitch.get_stream_title()
-                        telegram.send_live_alert(twitch.channel, title)
-                    else:
-                        logger.info("Stream is already live on bot startup. Skipping Telegram alert to avoid spam.")
+                    # If this is not the very first check (meaning the bot has been running), OR
+                    # if we want to be safe, we just always send it unless we have some other logic.
+                    # Actually, if was_live_db was 0, it means we cleanly saw it go offline before, 
+                    # OR this is a fresh database. So sending an alert is always correct here!
+                    logger.info("Stream just went live! Sending alert to Telegram.")
+                    title = twitch.get_stream_title()
+                    telegram.send_live_alert(twitch.channel, title)
                     
                 logger.info(f"Stream is live. Recording audio chunk ({recording_duration}s)...")
                 success, timecode_sec = await twitch.record_audio(chunk_file, duration_sec=recording_duration)
@@ -83,12 +87,10 @@ async def main():
                         track_full_name = f"{artist} - {title}"
                         logger.info(f"Track identified: {track_full_name}")
                         
-                        if track_full_name not in tracks_played_this_stream:
-                            tracks_played_this_stream.add(track_full_name)
-                            
-                            spotify_id, spotify_url = spotify.search_track(title, artist)
-                            await db.add_track(title, artist, spotify_id)
-                            
+                        spotify_id, spotify_url = spotify.search_track(title, artist)
+                        
+                        # Database handles deduplication for THIS stream session using current_stream_id
+                        if await db.add_track(title, artist, current_stream_id, spotify_id):
                             if spotify_url:
                                 logger.info("Track found on Spotify. Sending to Telegram.")
                             else:
@@ -122,10 +124,9 @@ async def main():
                         except OSError:
                             pass
             else:
-                if was_live:
+                if was_live_db:
                     logger.info("Stream went offline.")
-                    was_live = False
-                    tracks_played_this_stream.clear()
+                    await db.set_state("is_live", "0")
                 else:
                     logger.info("Stream is offline.")
                 consecutive_failures = 0
@@ -134,7 +135,6 @@ async def main():
             logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
             consecutive_failures = 0
             
-        is_first_check = False
         logger.debug(f"Sleeping for {sleep_time}s.")
         await asyncio.sleep(sleep_time)
 
