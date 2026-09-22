@@ -1,6 +1,6 @@
 shazamio==0.5.1
 spotipy==2.24.0
-streamlink==8.6.1
+yt-dlp
 python-dotenv==1.0.1
 aiofiles==22.1.0
 SQLAlchemy==2.0.31

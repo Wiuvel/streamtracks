@@ -7,6 +7,7 @@ from db import Database
 from shazam import ShazamAnalyzer
 from spotify import SpotifyClient
 from twitch import TwitchMonitor
+from telegram_bot import TelegramBot
 
 # Load environment variables
 load_dotenv()
@@ -14,11 +15,10 @@ load_dotenv()
 # Setup standard logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 # Suppress noisy debug logs from third-party libraries
-logging.getLogger("streamlink").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("spotipy").setLevel(logging.WARNING)
 
@@ -34,6 +34,7 @@ async def main():
     twitch = TwitchMonitor()
     shazam = ShazamAnalyzer()
     spotify = SpotifyClient()
+    telegram = TelegramBot()
     
     check_interval = int(os.getenv("CHECK_INTERVAL_SEC", "120"))
     fallback_interval = int(os.getenv("FALLBACK_INTERVAL_SEC", "20"))
@@ -52,7 +53,7 @@ async def main():
         sleep_time = check_interval
         
         try:
-            if twitch.get_audio_stream():
+            if twitch.get_audio_stream_url():
                 logger.info("Stream is live. Recording audio chunk.")
                 success = await twitch.record_audio(chunk_file, duration_sec=15)
                 
@@ -63,17 +64,20 @@ async def main():
                     if result:
                         consecutive_failures = 0
                         title, artist = result["title"], result["artist"]
-                        logger.info(f"Track identified: {artist} - {title}")
+                        track_full_name = f"{artist} - {title}"
+                        logger.info(f"Track identified: {track_full_name}")
                         
                         if await db.add_track(title, artist):
-                            spotify_id = spotify.search_track(title, artist)
-                            if spotify_id:
-                                if spotify.add_to_playlist(spotify_id):
-                                    logger.info("Track successfully added to Spotify playlist.")
-                                else:
-                                    logger.warning("Failed to add track to playlist or it already exists.")
+                            spotify_id, spotify_url = spotify.search_track(title, artist)
+                            
+                            if spotify_url:
+                                message = f"<b>{track_full_name}</b>\n\n<a href='{spotify_url}'>Listen on Spotify</a>"
+                                logger.info("Track found on Spotify. Sending to Telegram.")
                             else:
-                                logger.warning("Track not found on Spotify.")
+                                message = f"<b>{track_full_name}</b>\n\n<i>Not found on Spotify</i>"
+                                logger.warning("Track not found on Spotify. Sending basic info to Telegram.")
+                                
+                            telegram.send_message(message)
                         else:
                             logger.info("Track already in local database. Skipped.")
                     else:

@@ -1,48 +1,40 @@
 #!/bin/bash
-set -e
 
-echo "=== StreamTracks Bot Setup ==="
+echo "==================================="
+echo "    StreamTracks VPS Setup Script  "
+echo "==================================="
 
-# Check if docker is installed
+# 1. Check for Docker
 if ! command -v docker &> /dev/null; then
-    echo "Docker could not be found. Please install Docker first."
-    echo "curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh"
+    echo "[ERROR] Docker is not installed. Please install Docker first."
     exit 1
 fi
 
+# 2. Check for .env file
 if [ ! -f .env ]; then
-    echo "Creating .env file.."
+    echo "[INFO] No .env file found. Creating from .env.example..."
     cp .env.example .env
-
-    read -p "Enter Twitch Channel to monitor: " twitch_channel
-    sed -i "s/TWITCH_CHANNEL=.*/TWITCH_CHANNEL=$twitch_channel/" .env
-
-    read -p "Enter your Twitch OAuth token (auth-token cookie): " twitch_oauth
-    sed -i "s/TWITCH_OAUTH_TOKEN=.*/TWITCH_OAUTH_TOKEN=$twitch_oauth/" .env
-
-    echo "---"
-    echo "To get Spotify credentials, go to https://developer.spotify.com/dashboard"
-    echo "Create an app and add http://localhost:8080/callback to Redirect URIs."
-    echo "---"
-    read -p "Enter Spotify Client ID: " spotify_client_id
-    sed -i "s/SPOTIFY_CLIENT_ID=.*/SPOTIFY_CLIENT_ID=$spotify_client_id/" .env
-
-    read -p "Enter Spotify Client Secret: " spotify_secret
-    sed -i "s/SPOTIFY_CLIENT_SECRET=.*/SPOTIFY_CLIENT_SECRET=$spotify_secret/" .env
-
-    read -p "Enter Target Spotify Playlist ID: " spotify_playlist
-    sed -i "s/SPOTIFY_PLAYLIST_ID=.*/SPOTIFY_PLAYLIST_ID=$spotify_playlist/" .env
+    echo "[ACTION REQUIRED] Please edit the .env file with your credentials (nano .env) and run this script again."
+    exit 1
 fi
 
-echo "Building Docker image.."
-docker compose build
+echo "[INFO] Building Docker image..."
+docker compose build --quiet
 
-echo "Setting up Spotify Auth.."
-# Run the python script interactively to generate the token cache
-docker compose run --rm -v $(pwd)/data:/data bot python app/setup_spotify.py
+echo "[INFO] Running Pre-flight Configuration Checks..."
+docker compose run --rm bot python check_config.py
+CHECK_STATUS=$?
 
-echo "Starting the bot.."
-docker compose up -d
+if [ $CHECK_STATUS -ne 0 ]; then
+    echo "[ERROR] Configuration checks failed. Please fix your .env file and try again."
+    exit 1
+fi
 
-echo "=== Setup Complete! ==="
-echo "You can check logs with: docker compose logs -f bot"
+echo "==================================="
+echo " ✅ Setup Complete!"
+echo "==================================="
+echo "To start the bot in the background, run:"
+echo "  docker compose up -d"
+echo ""
+echo "To view logs, run:"
+echo "  docker compose logs -f"
