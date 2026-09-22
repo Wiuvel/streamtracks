@@ -38,15 +38,19 @@ class TwitchMonitor:
 
         m3u8_url = self.get_audio_stream_url()
         if not m3u8_url:
+            logger.error("Failed to get M3U8 URL from yt-dlp.")
             return False
 
         ts_file = final_output_file.replace(".mp3", ".ts")
+        logger.info(f"Got M3U8 URL: {m3u8_url.split('?')[0]}...")
         
         try:
             # 1. Fetch the M3U8 playlist
             req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
             with urllib.request.urlopen(req, timeout=10) as response:
                 m3u8_content = response.read().decode('utf-8')
+            
+            logger.info(f"Fetched M3U8. Length: {len(m3u8_content)} bytes. First 100 chars: {m3u8_content[:100].replace(chr(10), ' ')}")
             
             # 2. Extract TS segment URLs
             ts_urls = []
@@ -63,14 +67,19 @@ class TwitchMonitor:
                 logger.error("No TS segments found in M3U8 playlist.")
                 return False
 
+            logger.info(f"Found {len(ts_urls)} raw segment URLs in playlist. First URL: {ts_urls[0].split('?')[0]}")
+
             # Filter out known Twitch ad server segments
             real_ts_urls = [url for url in ts_urls if "weaver" not in url.lower() and "stitched" not in url.lower()]
             if not real_ts_urls:
-                real_ts_urls = ts_urls # Fallback if all are flagged
+                logger.warning("All segments appear to be ad servers! Falling back to raw list.")
+                real_ts_urls = ts_urls
 
             # Take segments from the END of the playlist (the actual live edge) to avoid pre-roll ads
             chunks_needed = (duration_sec // 2) + 2
             target_urls = real_ts_urls[-chunks_needed:]
+            
+            logger.info(f"Selected {len(target_urls)} segments from the live edge to download.")
 
             # 3. Download the TS chunks natively using Python
             with open(ts_file, 'wb') as f_out:
@@ -84,15 +93,18 @@ class TwitchMonitor:
                         continue
             
             # Check if we downloaded anything
-            if not os.path.exists(ts_file) or os.path.getsize(ts_file) < 10000:
-                logger.error("Failed to download sufficient TS data natively.")
+            if not os.path.exists(ts_file):
+                logger.error("TS file does not exist after download attempt.")
+                return False
+                
+            ts_size = os.path.getsize(ts_file)
+            logger.info(f"Downloaded TS file natively. Total size: {ts_size / 1024:.2f} KB.")
+            
+            if ts_size < 10000:
+                logger.error("Failed to download sufficient TS data natively (file too small).")
                 return False
 
             # 4. Use ffprobe to detect how many audio streams are in the TS file.
-            # If the streamer uses OBS "Twitch VOD Track", the TS file might contain TWO audio tracks.
-            # Often, Track 1 is muted/VOD-only, and Track 2 has the music. ffmpeg defaults to Track 1.
-            # We will dynamically mix all audio tracks together if there are multiple!
-            
             probe_cmd = [
                 "ffprobe", "-v", "error", 
                 "-select_streams", "a", 
@@ -104,7 +116,9 @@ class TwitchMonitor:
             try:
                 probe_out = subprocess.check_output(probe_cmd).decode('utf-8').strip()
                 num_audio = len([x for x in probe_out.splitlines() if x])
-            except Exception:
+                logger.info(f"ffprobe output: '{probe_out.replace(chr(10), ',')}', Tracks detected: {num_audio}")
+            except Exception as e:
+                logger.warning(f"ffprobe failed: {e}")
                 num_audio = 1
 
             if num_audio > 1:
@@ -115,6 +129,7 @@ class TwitchMonitor:
                     "-vn", "-acodec", "libmp3lame", final_output_file
                 ]
             else:
+                logger.info("Only 1 audio track detected. Proceeding with standard extraction.")
                 cmd = [
                     "ffmpeg", "-y", "-i", ts_file,
                     "-vn", "-acodec", "libmp3lame", final_output_file
@@ -134,9 +149,15 @@ class TwitchMonitor:
             if os.path.exists(ts_file):
                 os.remove(ts_file)
                 
-            if success and os.path.exists(final_output_file) and os.path.getsize(final_output_file) > 1000:
-                return True
+            if success and os.path.exists(final_output_file):
+                mp3_size = os.path.getsize(final_output_file)
+                logger.info(f"ffmpeg conversion successful. MP3 size: {mp3_size / 1024:.2f} KB.")
+                if mp3_size > 1000:
+                    return True
+                else:
+                    logger.warning("MP3 file is too small (likely silent/empty).")
                 
+            logger.error("ffmpeg failed to convert TS to MP3.")
             return False
 
         except Exception as e:
