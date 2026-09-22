@@ -22,7 +22,7 @@ echo "[INFO] Building Docker image..."
 docker compose build --quiet
 
 echo "[INFO] Running Pre-flight Configuration Checks..."
-docker compose run --rm bot python check_config.py
+docker compose run --rm bot python app/check_config.py
 CHECK_STATUS=$?
 
 if [ $CHECK_STATUS -ne 0 ]; then
