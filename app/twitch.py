@@ -63,9 +63,14 @@ class TwitchMonitor:
                 logger.error("No TS segments found in M3U8 playlist.")
                 return False
 
-            # Each Twitch TS chunk is typically 2 seconds. We need (duration_sec / 2) + 1 chunks.
+            # Filter out known Twitch ad server segments
+            real_ts_urls = [url for url in ts_urls if "weaver" not in url.lower() and "stitched" not in url.lower()]
+            if not real_ts_urls:
+                real_ts_urls = ts_urls # Fallback if all are flagged
+
+            # Take segments from the END of the playlist (the actual live edge) to avoid pre-roll ads
             chunks_needed = (duration_sec // 2) + 2
-            target_urls = ts_urls[:chunks_needed]
+            target_urls = real_ts_urls[-chunks_needed:]
 
             # 3. Download the TS chunks natively using Python
             with open(ts_file, 'wb') as f_out:
@@ -83,15 +88,37 @@ class TwitchMonitor:
                 logger.error("Failed to download sufficient TS data natively.")
                 return False
 
-            # 4. Use local ffmpeg ONLY to convert the local TS file to MP3 (no networking)
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-i", ts_file,
-                "-vn",
-                "-acodec", "libmp3lame",
-                final_output_file
+            # 4. Use ffprobe to detect how many audio streams are in the TS file.
+            # If the streamer uses OBS "Twitch VOD Track", the TS file might contain TWO audio tracks.
+            # Often, Track 1 is muted/VOD-only, and Track 2 has the music. ffmpeg defaults to Track 1.
+            # We will dynamically mix all audio tracks together if there are multiple!
+            
+            probe_cmd = [
+                "ffprobe", "-v", "error", 
+                "-select_streams", "a", 
+                "-show_entries", "stream=index", 
+                "-of", "csv=p=0", 
+                ts_file
             ]
+            
+            try:
+                probe_out = subprocess.check_output(probe_cmd).decode('utf-8').strip()
+                num_audio = len([x for x in probe_out.splitlines() if x])
+            except Exception:
+                num_audio = 1
+
+            if num_audio > 1:
+                logger.info(f"Detected {num_audio} audio tracks in TS chunk! Mixing them to ensure music is captured.")
+                cmd = [
+                    "ffmpeg", "-y", "-i", ts_file,
+                    "-filter_complex", f"amix=inputs={num_audio}:duration=longest",
+                    "-vn", "-acodec", "libmp3lame", final_output_file
+                ]
+            else:
+                cmd = [
+                    "ffmpeg", "-y", "-i", ts_file,
+                    "-vn", "-acodec", "libmp3lame", final_output_file
+                ]
             
             def _run_convert():
                 res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
