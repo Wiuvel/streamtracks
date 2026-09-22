@@ -15,8 +15,8 @@ class TwitchMonitor:
         """Uses yt-dlp to extract the raw m3u8 stream URL"""
         url = f"https://twitch.tv/{self.channel}"
         try:
-            # -g gets the direct URL, -f gets audio_only or the worst quality video if audio is missing
-            cmd = ["yt-dlp", "-g", "-f", "audio_only/worst", url]
+            # -g gets the direct URL, -f prioritizes the worst quality video (160p) to guarantee Track 1 audio (live audio), fallback to audio_only
+            cmd = ["yt-dlp", "-g", "-f", "worst/audio_only", url]
             
             # If user has an oauth token, we pass it to bypass ad-blocks and sub-only restrictions
             if self.oauth_token and "your_" not in self.oauth_token:

@@ -54,8 +54,8 @@ async def main():
         
         try:
             if twitch.get_audio_stream_url():
-                logger.info("Stream is live. Recording audio chunk.")
-                success = await twitch.record_audio(chunk_file, duration_sec=15)
+                logger.info("Stream is live. Recording audio chunk (25s)...")
+                success = await twitch.record_audio(chunk_file, duration_sec=25)
                 
                 if success and os.path.exists(chunk_file):
                     logger.info("Chunk recorded. Analyzing audio.")
