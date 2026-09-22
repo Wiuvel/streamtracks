@@ -52,6 +52,7 @@ async def main():
     # Track history to avoid duplicates in the same stream session
     tracks_played_this_stream = set()
     was_live = False
+    is_first_check = True
 
     while True:
         sleep_time = check_interval
@@ -59,12 +60,15 @@ async def main():
         try:
             if twitch.get_audio_stream_url():
                 if not was_live:
-                    logger.info("Stream just went live! Sending alert to Telegram.")
-                    title = twitch.get_stream_title()
-                    telegram.send_live_alert(twitch.channel, title)
                     was_live = True
-                    # Clear track history for the new stream
                     tracks_played_this_stream.clear()
+                    
+                    if not is_first_check:
+                        logger.info("Stream just went live! Sending alert to Telegram.")
+                        title = twitch.get_stream_title()
+                        telegram.send_live_alert(twitch.channel, title)
+                    else:
+                        logger.info("Stream is already live on bot startup. Skipping Telegram alert to avoid spam.")
                     
                 logger.info(f"Stream is live. Recording audio chunk ({recording_duration}s)...")
                 success, timecode_sec = await twitch.record_audio(chunk_file, duration_sec=recording_duration)
@@ -130,6 +134,7 @@ async def main():
             logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
             consecutive_failures = 0
             
+        is_first_check = False
         logger.debug(f"Sleeping for {sleep_time}s.")
         await asyncio.sleep(sleep_time)
 

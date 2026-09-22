@@ -30,16 +30,9 @@ class TwitchMonitor:
             return None
 
     def get_stream_title(self) -> str:
-        """Fetches the current stream title using yt-dlp."""
-        url = f"https://twitch.tv/{self.channel}"
-        try:
-            cmd = ["yt-dlp", "--print", "%(title)s", url]
-            if self.oauth_token and "your_" not in self.oauth_token:
-                cmd.extend(["--extractor-args", f"twitch:api_header=Authorization=OAuth {self.oauth_token}"])
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return result.stdout.strip()
-        except Exception:
-            return "Трансляция"
+        """Returns the current date as the stream title per user preference."""
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d")
 
     async def record_audio(self, final_output_file: str, duration_sec: int = 25) -> tuple[bool, float]:
         """Downloads HLS segments and converts to MP3. Returns (success, timecode_sec)."""
