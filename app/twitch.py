@@ -42,15 +42,13 @@ class TwitchMonitor:
             return False
 
         ts_file = final_output_file.replace(".mp3", ".ts")
-        logger.info(f"Got M3U8 URL: {m3u8_url.split('?')[0]}...")
+        logger.info(f"Got M3U8 URL: {m3u8_url[:50]}...[truncated]")
         
         try:
             # 1. Fetch the M3U8 playlist
             req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
             with urllib.request.urlopen(req, timeout=10) as response:
                 m3u8_content = response.read().decode('utf-8')
-            
-            logger.info(f"Fetched M3U8. Length: {len(m3u8_content)} bytes. First 100 chars: {m3u8_content[:100].replace(chr(10), ' ')}")
             
             # 2. Extract TS segment URLs
             ts_urls = []
@@ -67,7 +65,7 @@ class TwitchMonitor:
                 logger.error("No TS segments found in M3U8 playlist.")
                 return False
 
-            logger.info(f"Found {len(ts_urls)} raw segment URLs in playlist. First URL: {ts_urls[0].split('?')[0]}")
+            logger.info(f"Found {len(ts_urls)} raw segment URLs in playlist. First URL: {ts_urls[0][:50]}...[truncated]")
 
             # Filter out known Twitch ad server segments
             real_ts_urls = [url for url in ts_urls if "weaver" not in url.lower() and "stitched" not in url.lower()]
@@ -123,9 +121,15 @@ class TwitchMonitor:
 
             if num_audio > 1:
                 logger.info(f"Detected {num_audio} audio tracks in TS chunk! Mixing them to ensure music is captured.")
+                
+                # Construct the filter string e.g. "[0:a:0][0:a:1]amix=inputs=2:duration=longest[a]"
+                filter_inputs = "".join([f"[0:a:{i}]" for i in range(num_audio)])
+                filter_str = f"{filter_inputs}amix=inputs={num_audio}:duration=longest[a]"
+                
                 cmd = [
                     "ffmpeg", "-y", "-i", ts_file,
-                    "-filter_complex", f"amix=inputs={num_audio}:duration=longest",
+                    "-filter_complex", filter_str,
+                    "-map", "[a]",
                     "-vn", "-acodec", "libmp3lame", final_output_file
                 ]
             else:
@@ -136,7 +140,9 @@ class TwitchMonitor:
                 ]
             
             def _run_convert():
-                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                if res.returncode != 0:
+                    logger.error(f"ffmpeg error output: {res.stderr}")
                 return res.returncode == 0
                 
             loop = asyncio.get_event_loop()
