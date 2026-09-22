@@ -13,6 +13,7 @@ class TwitchMonitor:
         self.oauth_token = os.getenv("TWITCH_OAUTH_TOKEN")
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         self.cached_m3u8_url = None
+        self.ad_flush_delay = int(os.getenv("AD_FLUSH_DELAY_SEC", "55"))
             
     def get_audio_stream_url(self):
         """Quick check to see if stream is live and returns M3U8 URL"""
@@ -28,8 +29,20 @@ class TwitchMonitor:
         except Exception:
             return None
 
-    async def record_audio(self, final_output_file: str, duration_sec: int = 25) -> bool:
-        """Downloads HLS segments manually in Python to bypass ffmpeg's HTTP client fingerprinting, then converts to MP3."""
+    def get_stream_title(self) -> str:
+        """Fetches the current stream title using yt-dlp."""
+        url = f"https://twitch.tv/{self.channel}"
+        try:
+            cmd = ["yt-dlp", "--print", "%(title)s", url]
+            if self.oauth_token and "your_" not in self.oauth_token:
+                cmd.extend(["--extractor-args", f"twitch:api_header=Authorization=OAuth {self.oauth_token}"])
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return result.stdout.strip()
+        except Exception:
+            return "Трансляция"
+
+    async def record_audio(self, final_output_file: str, duration_sec: int = 25) -> tuple[bool, float]:
+        """Downloads HLS segments and converts to MP3. Returns (success, timecode_sec)."""
         
         if os.path.exists(final_output_file):
             try:
@@ -46,7 +59,7 @@ class TwitchMonitor:
         m3u8_url = self.cached_m3u8_url
         if not m3u8_url:
             logger.error("Failed to get M3U8 URL from yt-dlp.")
-            return False
+            return False, 0.0
 
         ts_file = final_output_file.replace(".mp3", ".ts")
         logger.info(f"Using M3U8 URL: {m3u8_url[:50]}...[truncated]")
@@ -59,19 +72,26 @@ class TwitchMonitor:
                     pass # Throw away the ad playlist
                     
                 # We must wait long enough for the 30s ad to finish AND for it to completely fall off 
-                # the back of the sliding HLS playlist window (~20s history). 30s + 25s = 55 seconds.
-                logger.info("New session started. Waiting 55 seconds to completely flush the silent pre-roll ad from the playlist...")
-                await asyncio.sleep(55)
+                # the back of the sliding HLS playlist window (~20s history).
+                logger.info(f"New session started. Waiting {self.ad_flush_delay} seconds to completely flush the silent pre-roll ad from the playlist...")
+                await asyncio.sleep(self.ad_flush_delay)
             
             # 2. Fetch the M3U8 playlist. The ad is now gone forever for this session!
             req = urllib.request.Request(m3u8_url, headers={'User-Agent': self.user_agent})
             with urllib.request.urlopen(req, timeout=10) as response:
                 m3u8_content = response.read().decode('utf-8')
             
-            # 3. Extract TS segment URLs
+            # 3. Extract TS segment URLs and stream uptime
             ts_urls = []
+            elapsed_secs = 0.0
+            
             for line in m3u8_content.splitlines():
-                if line and not line.startswith('#'):
+                if line.startswith('#EXT-X-TWITCH-ELAPSED-SECS:'):
+                    try:
+                        elapsed_secs = float(line.split(':')[1])
+                    except ValueError:
+                        pass
+                elif line and not line.startswith('#'):
                     # Handle relative vs absolute URLs just in case
                     if line.startswith('http'):
                         ts_urls.append(line)
@@ -81,7 +101,7 @@ class TwitchMonitor:
 
             if not ts_urls:
                 logger.error("No TS segments found in M3U8 playlist.")
-                return False
+                return False, 0.0
 
             logger.info(f"Found {len(ts_urls)} raw segment URLs in playlist. First URL: {ts_urls[0][:50]}...[truncated]")
 
@@ -111,14 +131,14 @@ class TwitchMonitor:
             # Check if we downloaded anything
             if not os.path.exists(ts_file):
                 logger.error("TS file does not exist after download attempt.")
-                return False
+                return False, 0.0
                 
             ts_size = os.path.getsize(ts_file)
             logger.info(f"Downloaded TS file natively. Total size: {ts_size / 1024:.2f} KB.")
             
             if ts_size < 10000:
                 logger.error("Failed to download sufficient TS data natively (file too small).")
-                return False
+                return False, 0.0
 
             # 4. Use ffprobe to detect how many audio streams are in the TS file.
             probe_cmd = [
@@ -180,12 +200,12 @@ class TwitchMonitor:
                 mp3_size = os.path.getsize(final_output_file)
                 logger.info(f"ffmpeg conversion successful. MP3 size: {mp3_size / 1024:.2f} KB.")
                 if mp3_size > 1000:
-                    return True
+                    return True, elapsed_secs
                 else:
                     logger.warning("MP3 file is too small (likely silent/empty).")
                 
             logger.error("ffmpeg failed to convert TS to MP3.")
-            return False
+            return False, 0.0
 
         except urllib.error.HTTPError as e:
             logger.warning(f"HTTP Error {e.code} while fetching M3U8. Session may have expired. Clearing cache.")

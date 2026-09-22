@@ -9,10 +9,14 @@ logger = logging.getLogger("spotify")
 class SpotifyClient:
     def __init__(self):
         # We no longer need user OAuth or scopes since we only search for tracks!
-        self.sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-            client_id=os.getenv("SPOTIFY_CLIENT_ID"),
-            client_secret=os.getenv("SPOTIFY_CLIENT_SECRET")
-        ))
+        self.sp = spotipy.Spotify(
+            auth_manager=SpotifyClientCredentials(
+                client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+                client_secret=os.getenv("SPOTIFY_CLIENT_SECRET")
+            ),
+            requests_timeout=20,
+            retries=3
+        )
 
     def search_track(self, title: str, artist: str):
         import re

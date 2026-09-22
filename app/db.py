@@ -32,13 +32,6 @@ class Database:
     async def add_track(self, title: str, artist: str, spotify_id: str = None) -> bool:
         try:
             async with self.async_session() as session:
-                stmt = select(Track).where(Track.title == title, Track.artist == artist)
-                result = await session.execute(stmt)
-                existing_track = result.scalars().first()
-                
-                if existing_track:
-                    return False
-                    
                 new_track = Track(title=title, artist=artist, spotify_id=spotify_id)
                 session.add(new_track)
                 await session.commit()

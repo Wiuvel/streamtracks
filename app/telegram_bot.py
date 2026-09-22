@@ -38,3 +38,31 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Error sending message to Telegram: {e}")
             return False
+
+    def send_live_alert(self, channel: str, title: str) -> bool:
+        text = (
+            f"<b>Стрим начался!</b>\n\n"
+            f"Канал: <b>{channel}</b>\n"
+            f"Трансляция: <i>{title}</i>\n\n"
+            f"<a href='https://twitch.tv/{channel}'>Смотреть на Twitch</a>"
+        )
+        return self.send_message(text)
+        
+    def send_track(self, track_full_name: str, spotify_url: str, timecode_sec: float) -> bool:
+        # Format timecode
+        time_str = ""
+        if timecode_sec and timecode_sec > 0:
+            m, s = divmod(int(timecode_sec), 60)
+            h, m = divmod(m, 60)
+            if h > 0:
+                time_str = f" [{h:02d}:{m:02d}:{s:02d}]"
+            else:
+                time_str = f" [{m:02d}:{s:02d}]"
+                
+        text = f"<b>{track_full_name}</b>{time_str}\n\n"
+        if spotify_url:
+            text += f"<a href='{spotify_url}'>Слушать в Spotify</a>"
+        else:
+            text += f"<i>(В Spotify не найдено)</i>"
+            
+        return self.send_message(text)
