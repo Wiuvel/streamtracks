@@ -18,24 +18,25 @@ class SpotifyClient:
             retries=3
         )
 
-    def search_track(self, title: str, artist: str):
+    async def search_track(self, title: str, artist: str):
         import re
+        import asyncio
         
         # 1. Try exact search
         query = f"track:{title} artist:{artist}"
         try:
-            results = self.sp.search(q=query, type="track", limit=1)
+            results = await asyncio.to_thread(self.sp.search, q=query, type="track", limit=1)
             tracks = results.get("tracks", {}).get("items", [])
             if tracks:
                 track = tracks[0]
                 return track["id"], track["external_urls"]["spotify"]
                 
-            # 2. Smart fallback: strip all brackets and parentheses from the title (e.g. "[Mixed]", "(feat. ...)")
+            # 2. Smart fallback: strip all brackets and parentheses from the title
             clean_title = re.sub(r'[\(\[].*?[\)\]]', '', title).strip()
             if clean_title and clean_title != title:
                 logger.info(f"Exact match failed. Retrying search with cleaned title: '{clean_title}'")
                 query = f"track:{clean_title} artist:{artist}"
-                results = self.sp.search(q=query, type="track", limit=1)
+                results = await asyncio.to_thread(self.sp.search, q=query, type="track", limit=1)
                 tracks = results.get("tracks", {}).get("items", [])
                 if tracks:
                     track = tracks[0]
