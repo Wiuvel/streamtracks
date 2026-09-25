@@ -89,11 +89,13 @@ class TelegramBot:
             return False
 
     async def send_live_alert(self, channel: str, title: str) -> bool:
+        import time
+        cache_buster = int(time.time())
         text = (
             f"<b>Стрим начался!</b>\n\n"
             f"Канал: <b>{channel}</b>\n"
             f"Трансляция: {title}\n\n"
-            f"<a href='https://twitch.tv/{channel}'>Смотреть на Twitch</a>"
+            f"<a href='https://twitch.tv/{channel}?v={cache_buster}'>Смотреть на Twitch</a>"
         )
         msg_id = await self.send_message(text)
         if msg_id:

@@ -28,6 +28,7 @@ logger = logging.getLogger("core")
 async def producer_capture(twitch: TwitchMonitor, analyze_queue: asyncio.Queue, db: Database, telegram: TelegramBot, check_interval: int, recording_duration: int, max_retries: int, fallback_interval: int):
     """Task 1: Continuously captures audio chunks and pushes them to the queue."""
     consecutive_failures = 0
+    offline_strikes = 0
     
     while True:
         sleep_time = check_interval
@@ -37,6 +38,7 @@ async def producer_capture(twitch: TwitchMonitor, analyze_queue: asyncio.Queue, 
             current_stream_id = await db.get_state("current_stream_id")
             
             if is_live_now:
+                offline_strikes = 0  # Reset offline strikes
                 if not was_live_db:
                     current_stream_id = str(uuid.uuid4())
                     await db.set_state("current_stream_id", current_stream_id)
@@ -67,8 +69,13 @@ async def producer_capture(twitch: TwitchMonitor, analyze_queue: asyncio.Queue, 
                     consecutive_failures += 1
             else:
                 if was_live_db:
-                    logger.info("Stream went offline.")
-                    await db.set_state("is_live", "0")
+                    offline_strikes += 1
+                    if offline_strikes >= 3:
+                        logger.info(f"Stream went offline (confirmed after {offline_strikes} checks).")
+                        await db.set_state("is_live", "0")
+                        offline_strikes = 0
+                    else:
+                        logger.info(f"Stream appears offline (strike {offline_strikes}/3). Waiting to confirm...")
                 else:
                     logger.debug("Stream is offline.")
                 consecutive_failures = 0
